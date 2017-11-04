@@ -1,0 +1,66 @@
+#!/bin/bash
+#
+# Author: Joshua Crowgey (jcrowgey@uw.edu)
+#
+# Provides a wrapper to pactl's set-sink-volume and set-sink-mute commands
+# which provides notifications via dunstify.  Written for providing volume
+# change notifications in i3-wm.
+#
+# Relies upon the text format of pactl list sinks to output the correct info 
+# in the notification.
+
+function notify_volume() {
+  local awk_cmd
+  local sink_found
+  local to_find
+
+  # decide if this is a mute or a vol change
+  if [[ "$1" == "set-sink-volume" ]]; then
+    to_find="Volume"
+    awk_sep='/'
+    awk_cmd='{ print $4 }'
+  elif [[ "$1" == "set-sink-mute" ]]; then
+    to_find="Mute"
+    awk_sep=':'
+    awk_cmd='{ print $2 }'
+  fi
+
+  # look through the output of pactl
+  while read line; do
+    if echo "$line" | grep -q "Sink #$2"; then
+      sink_found="true"
+    fi
+
+    if [[ ! -z "${sink_found:-}" ]]; then
+        text_found=$(grep "${to_find}" | awk -F"${awk_sep}" "${awk_cmd}" \
+                      | sed -e 's/no/Unmuted/;s/yes/Muted/')
+      if [[ ! -z "${text_found:-}" ]]; then
+        break
+      fi
+    fi
+  done< <(pactl list sinks)
+
+
+  # construct a notification and send it
+  local timeout=3000
+  local app="Volume"
+  local nidfile="/tmp/volnid"
+  local dunstargs="-p -t ${timeout} -a ${app} ${app} ${text_found}"
+
+  if [[ -f "${nidfile}" ]]; then
+    dunstify -r $(<${nidfile}) ${dunstargs} > "${nidfile}"
+  else
+    dunstify ${dunstargs} > "${nidfile}"
+  fi
+}
+
+function main() {
+  local subcommand="$1"
+  local device="$2"
+  local arg="$3"
+
+  pactl "${subcommand}" "${device}" "${arg}"
+  notify_volume "${subcommand}" "${device}"
+}
+
+main $@
